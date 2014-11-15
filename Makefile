@@ -8,6 +8,6 @@ clean:
 	make -C /lib/modules/$(KVERSION)/build M=${PWD} clean
 	rm XWinMSR
 XWinMSR:	XWinMSR.o
-	gcc -o XWinMSR XWinMSR.c
+	gcc -lpthread -o XWinMSR XWinMSR.c
 XWinMSR.o:	XWinMSR.c
 	gcc -c XWinMSR.c -o XWinMSR.o

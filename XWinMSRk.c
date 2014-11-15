@@ -99,7 +99,7 @@ int XWinMSR_threadfn(void *data)
 		{
 			XWinMSR_CoreTemp(Proc, Core->cpu);
 
-			msleep(100);
+			msleep(Proc->msleep);
 		}
 	}
 	return(0);
@@ -109,35 +109,17 @@ static int XWinMSR_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	if(Proc && !remap_vmalloc_range(vma, Proc, 0))
 	{
-		unsigned int cpu=0, CPUCount=0;
-
-		CPUCount=XWinMSR_CPUCount();
-		Proc->CPUCount=(!CPUCount) ? 1 : CPUCount;
-
-		XWinMSR_CPUBrand(Proc);
-
-		printk("XWinMSR:%s [%d x CPU]\n", Proc->BrandString, Proc->CPUCount);
-
+		unsigned int cpu=0;
 		for(cpu=0; cpu < Proc->CPUCount; cpu++)
-		{
-			Proc->Core[cpu].cpu=cpu;
-
-			Proc->Core[cpu].TID=kthread_create(XWinMSR_threadfn, &Proc->Core[cpu], "XWinMSRthread%02d", Proc->Core[cpu].cpu);
-
-			kthread_bind(Proc->Core[cpu].TID, cpu);
-
 			wake_up_process(Proc->Core[cpu].TID);
-		}
 	}
 	return(0);
 }
 
 static int XWinMSR_release(struct inode *inode, struct file *file)
 {
-	int cpu;
-	for(cpu=0; cpu < Proc->CPUCount; cpu++)
-		kthread_stop(Proc->Core[cpu].TID);
-
+	if(Proc)
+		Proc->msleep=LOOP_DEF_MS;
 	return(0);
 }
 
@@ -167,7 +149,34 @@ static int __init XWinMSR_init(void)
 
 			XWinMSR.clsdev=class_create(THIS_MODULE, SHM_DEVNAME);
 
-			tmpDev=device_create(XWinMSR.clsdev, NULL, XWinMSR.mkdev, NULL, SHM_DEVNAME);
+			if((tmpDev=device_create(XWinMSR.clsdev, NULL, XWinMSR.mkdev, NULL, SHM_DEVNAME)) != NULL)
+			{
+				unsigned int cpu=0, CPUCount=0;
+
+				CPUCount=XWinMSR_CPUCount();
+				Proc->CPUCount=(!CPUCount) ? 1 : CPUCount;
+
+				XWinMSR_CPUBrand(Proc);
+
+				printk("XWinMSR:%s [%d x CPU]\n", Proc->BrandString, Proc->CPUCount);
+
+				Proc->msleep=LOOP_DEF_MS;
+
+				for(cpu=0; cpu < Proc->CPUCount; cpu++)
+				{
+					Proc->Core[cpu].cpu=cpu;
+
+					Proc->Core[cpu].TID=kthread_create(XWinMSR_threadfn, &Proc->Core[cpu], "XWinMSRthread%02d", Proc->Core[cpu].cpu);
+
+					kthread_bind(Proc->Core[cpu].TID, cpu);
+
+				}
+			}
+			else
+			{
+				printk("XWinMSR_init():device_create():KO\n");
+				return(-EBUSY);
+			}
 		}
 		else
 		{
@@ -190,8 +199,14 @@ static void __exit XWinMSR_cleanup(void)
 	cdev_del(XWinMSR.kcdev);
 	unregister_chrdev_region(XWinMSR.mkdev, 1);
 
-	if(Proc != NULL)
+	if(Proc)
+	{
+		unsigned int cpu;
+		for(cpu=0; cpu < Proc->CPUCount; cpu++)
+			kthread_stop(Proc->Core[cpu].TID);
+
 		vfree(Proc);
+	}
 }
 
 module_init(XWinMSR_init);

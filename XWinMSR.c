@@ -6,12 +6,40 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <errno.h>
+#include <termios.h>
+#include <pthread.h>
 
 #include "XWinMSR.h"
+
+const char CLS[6+1]={27,'[','H',27,'[','J',0};
+
+short int flag=0xff;
+
+static void *XWinMSR_threadfn(void *data)
+{
+	PROC *P=(PROC *) data;
+
+	while(flag)
+	{
+		int cpu;
+		printf("%s%s [%d x CPU]\n\n", CLS, P->BrandString, P->CPUCount);
+		for(cpu=0; cpu < P->CPUCount; cpu++)
+		{
+			P->Core[cpu].Temp=P->Core[cpu].TjMax.Target - P->Core[cpu].ThermStat.DTS;
+
+			printf("\tCore(%02d) @ %d°C\n", cpu, P->Core[cpu].Temp);
+		}
+		printf("\n(%d ms) [u] Up. [d] Down. [x] Exit.", P->msleep);
+		fflush(stdout);
+		usleep(P->msleep * 10000);
+	}
+	return(NULL);
+}
 
 int main(void)
 {
 	PROC *P=NULL;
+	pthread_t TID;
 
 	int  fd=open(SHM_FILENAME, O_RDWR);
 	if(fd != -1)
@@ -20,19 +48,37 @@ int main(void)
 
 		if(P != NULL)
 		{
-			printf("%s [%d x CPU]\n", P->BrandString, P->CPUCount);
+			struct termios oldt, newt;
+			tcgetattr ( STDIN_FILENO, &oldt );
+			newt = oldt;
+			newt.c_lflag &= ~( ICANON | ECHO );
+			newt.c_cc[VTIME] = 0;
+			newt.c_cc[VMIN] = 1;
+			tcsetattr ( STDIN_FILENO, TCSANOW, &newt );
 
-			do
+
+
+			if(!pthread_create(&TID, NULL, XWinMSR_threadfn, P))
 			{
-				int cpu;
-				for(cpu=0; cpu < P->CPUCount; cpu++)
+				int key=0;
+				while(flag)
 				{
-					P->Core[cpu].Temp=P->Core[cpu].TjMax.Target - P->Core[cpu].ThermStat.DTS;
-
-					printf("XWinMSR: Core(%02d) @ %d°C\n", cpu, P->Core[cpu].Temp);
+					key=getchar();
+					switch(key)
+					{
+						case 'u': if(P->msleep < LOOP_MAX_MS) P->msleep+=10;
+						break;
+						case 'd': if(P->msleep > LOOP_MIN_MS) P->msleep-=10;
+						break;
+						case 'x': flag=0;
+						break;
+					}
 				}
-				printf("\nInput [x] to Exit or [Enter] to update Core Temps:");
-			} while(getchar() != 'x') ;
+				pthread_join(TID, NULL);
+			}
+			tcsetattr ( STDIN_FILENO, TCSANOW, &oldt );
+			printf("\n");
+
 			munmap(P, sizeof(PROC));
 		}
 		else

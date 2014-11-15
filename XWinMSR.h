@@ -6,6 +6,9 @@
 #define IA32_THERM_STATUS               0x19c
 #define MSR_TEMPERATURE_TARGET          0x1a2
 
+#define	LOOP_MIN_MS	10
+#define LOOP_MAX_MS	500
+#define	LOOP_DEF_MS	100
 
 typedef struct
 {
@@ -77,7 +80,7 @@ typedef struct
 
 typedef struct
 {
-	unsigned int		CPUCount;
+	unsigned int		CPUCount, msleep;
 	BRAND			Brand;
 	char			BrandString[48+1];
 
